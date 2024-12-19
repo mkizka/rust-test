@@ -1,0 +1,7 @@
+---
+tasks:
+  - name: Create a directory
+    action: file
+    args:
+      path: /tmp/example
+      state: directory
