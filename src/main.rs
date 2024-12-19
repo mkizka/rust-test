@@ -2,7 +2,7 @@ use clap::{Arg, ArgAction, Command};
 use serde::Deserialize;
 use std::{fs, ops::Not, path::Path};
 
-#[derive(Deserialize, Clone)] // Clone traitを追加
+#[derive(Deserialize)]
 struct Task {
     name: String,
     action: String,
@@ -17,6 +17,23 @@ struct Playbook {
 trait TaskStrategy {
     fn condition(&self) -> bool;
     fn action(&self);
+    fn execute_task(&self, dry_run_mode: bool, task: &Task) {
+        if self.condition() {
+            if dry_run_mode {
+                println!(
+                    "[DRY-RUN] Condition met for task '{}', action would be executed.",
+                    task.name
+                );
+            } else {
+                self.action();
+            }
+        } else {
+            println!(
+                "Condition not met for task '{}', skipping action.",
+                task.name
+            );
+        }
+    }
 }
 
 struct FileTask {
@@ -127,24 +144,6 @@ fn main() {
             }
         };
 
-        execute_task(&*strategy, dry_run_mode, task);
+        strategy.execute_task(dry_run_mode, task);
     });
-}
-
-fn execute_task(strategy: &dyn TaskStrategy, dry_run_mode: bool, task: &Task) {
-    if strategy.condition() {
-        if dry_run_mode {
-            println!(
-                "[DRY-RUN] Condition met for task '{}', action would be executed.",
-                task.name
-            );
-        } else {
-            strategy.action();
-        }
-    } else {
-        println!(
-            "Condition not met for task '{}', skipping action.",
-            task.name
-        );
-    }
 }
