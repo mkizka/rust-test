@@ -1,12 +1,19 @@
 use clap::Parser;
 use serde::Deserialize;
-use std::{fs, ops::Not, path::Path};
+use std::{fs, path::Path};
 
 #[derive(Deserialize)]
 struct Task {
     name: String,
     action: String,
-    args: serde_yaml::Value,
+    args: TaskArgs,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type")]
+enum TaskArgs {
+    File { path: String },
+    Copy { src: String, dest: String },
 }
 
 #[derive(Deserialize)]
@@ -41,24 +48,22 @@ struct FileTask {
 }
 
 impl FileTask {
-    fn from_yaml(args: &serde_yaml::Value) -> Self {
-        FileTask {
-            path: args["path"]
-                .as_str()
-                .expect("Missing 'path' argument")
-                .to_string(),
-        }
+    fn new(path: String) -> Self {
+        FileTask { path }
     }
 }
 
 impl TaskStrategy for FileTask {
     fn condition(&self) -> bool {
-        Path::new(&self.path).exists().not()
+        !Path::new(&self.path).exists()
     }
 
     fn action(&self) {
-        fs::create_dir_all(&self.path).expect("Failed to create directory");
-        println!("Created directory: {}", self.path);
+        if let Err(e) = fs::create_dir_all(&self.path) {
+            eprintln!("Failed to create directory '{}': {}", self.path, e);
+        } else {
+            println!("Created directory: {}", self.path);
+        }
     }
 }
 
@@ -68,17 +73,8 @@ struct CopyTask {
 }
 
 impl CopyTask {
-    fn from_yaml(args: &serde_yaml::Value) -> Self {
-        CopyTask {
-            src: args["src"]
-                .as_str()
-                .expect("Missing 'src' argument")
-                .to_string(),
-            dest: args["dest"]
-                .as_str()
-                .expect("Invalid 'dest' argument")
-                .to_string(),
-        }
+    fn new(src: String, dest: String) -> Self {
+        CopyTask { src, dest }
     }
 }
 
@@ -88,8 +84,14 @@ impl TaskStrategy for CopyTask {
     }
 
     fn action(&self) {
-        fs::copy(&self.src, &self.dest).expect("Failed to copy file");
-        println!("Copied file from {} to {}", self.src, self.dest);
+        if let Err(e) = fs::copy(&self.src, &self.dest) {
+            eprintln!(
+                "Failed to copy file from '{}' to '{}': {}",
+                self.src, self.dest, e
+            );
+        } else {
+            println!("Copied file from {} to {}", self.src, self.dest);
+        }
     }
 }
 
@@ -112,21 +114,30 @@ struct Args {
 fn main() {
     let args = Args::parse();
 
-    let file = fs::read_to_string(&args.file).expect("Unable to read the playbook file");
-    let workflow: Workflow = serde_yaml::from_str(&file).expect("Invalid YAML format");
+    let file = match fs::read_to_string(&args.file) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("Unable to read the playbook file '{}': {}", args.file, e);
+            return;
+        }
+    };
+
+    let workflow: Workflow = match serde_yaml::from_str(&file) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            eprintln!("Invalid YAML format in file '{}': {}", args.file, e);
+            return;
+        }
+    };
 
     workflow.tasks.iter().for_each(|task| {
         if args.verbose {
             println!("Executing task: {}", task.name);
         }
 
-        let strategy: Box<dyn TaskStrategy> = match task.action.as_str() {
-            "file" => Box::new(FileTask::from_yaml(&task.args)),
-            "copy" => Box::new(CopyTask::from_yaml(&task.args)),
-            _ => {
-                println!("Unknown action: {}", task.action);
-                return;
-            }
+        let strategy: Box<dyn TaskStrategy> = match &task.args {
+            TaskArgs::File { path } => Box::new(FileTask::new(path.clone())),
+            TaskArgs::Copy { src, dest } => Box::new(CopyTask::new(src.clone(), dest.clone())),
         };
 
         strategy.execute_task(args.dry_run, task);
