@@ -2,11 +2,18 @@ use clap::{Arg, ArgAction, Command};
 use serde::Deserialize;
 use std::{fs, ops::Not, path::Path};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)] // Clone traitを追加
 struct Task {
     name: String,
     action: String,
-    args: serde_yaml::Value,
+    args: TaskArgs,
+}
+
+#[derive(Deserialize, Clone)] // Clone traitを追加
+struct TaskArgs {
+    path: Option<String>,
+    src: Option<String>,
+    dest: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -15,36 +22,55 @@ struct Playbook {
 }
 
 trait TaskStrategy {
-    fn condition(&self, args: &serde_yaml::Value) -> bool;
-    fn action(&self, args: &serde_yaml::Value);
+    fn condition(&self) -> bool;
+    fn action(&self);
 }
 
-struct FileTask;
+struct FileTask {
+    path: String,
+}
+
+impl FileTask {
+    fn from_yaml(args: TaskArgs) -> Self {
+        FileTask {
+            path: args.path.expect("Missing 'path' argument"),
+        }
+    }
+}
+
 impl TaskStrategy for FileTask {
-    fn condition(&self, args: &serde_yaml::Value) -> bool {
-        Path::new(args["path"].as_str().expect("Missing 'path' argument"))
-            .exists()
-            .not()
+    fn condition(&self) -> bool {
+        Path::new(&self.path).exists().not()
     }
 
-    fn action(&self, args: &serde_yaml::Value) {
-        let path = args["path"].as_str().expect("Invalid 'path' argument");
-        fs::create_dir_all(path).expect("Failed to create directory");
-        println!("Created directory: {}", path);
+    fn action(&self) {
+        fs::create_dir_all(&self.path).expect("Failed to create directory");
+        println!("Created directory: {}", self.path);
     }
 }
 
-struct CopyTask;
+struct CopyTask {
+    src: String,
+    dest: String,
+}
+
+impl CopyTask {
+    fn from_yaml(args: TaskArgs) -> Self {
+        CopyTask {
+            src: args.src.expect("Missing 'src' argument"),
+            dest: args.dest.expect("Missing 'dest' argument"),
+        }
+    }
+}
+
 impl TaskStrategy for CopyTask {
-    fn condition(&self, args: &serde_yaml::Value) -> bool {
-        !Path::new(args["dest"].as_str().expect("Missing 'dest' argument")).exists()
+    fn condition(&self) -> bool {
+        !Path::new(&self.dest).exists()
     }
 
-    fn action(&self, args: &serde_yaml::Value) {
-        let src = args["src"].as_str().expect("Missing 'src' argument");
-        let dest = args["dest"].as_str().expect("Invalid 'dest' argument");
-        fs::copy(src, dest).expect("Failed to copy file");
-        println!("Copied file from {} to {}", src, dest);
+    fn action(&self) {
+        fs::copy(&self.src, &self.dest).expect("Failed to copy file");
+        println!("Copied file from {} to {}", self.src, self.dest);
     }
 }
 
@@ -91,29 +117,27 @@ fn main() {
         }
 
         let strategy: Box<dyn TaskStrategy> = match task.action.as_str() {
-            "file" => Box::new(FileTask),
-            "copy" => Box::new(CopyTask),
+            "file" => Box::new(FileTask::from_yaml(task.args.clone())),
+            "copy" => Box::new(CopyTask::from_yaml(task.args.clone())),
             _ => {
                 println!("Unknown action: {}", task.action);
                 return;
             }
         };
 
-        execute_task(&*strategy, &task.args, dry_run_mode, task);
+        execute_task(&*strategy, dry_run_mode, task);
     });
 }
 
-fn execute_task(
-    strategy: &dyn TaskStrategy,
-    args: &serde_yaml::Value,
-    dry_run_mode: bool,
-    task: &Task,
-) {
-    if strategy.condition(args) {
+fn execute_task(strategy: &dyn TaskStrategy, dry_run_mode: bool, task: &Task) {
+    if strategy.condition() {
         if dry_run_mode {
-            println!("[DRY-RUN] Condition met for task '{}', action would be executed with arguments: {:?}", task.name, task.args);
+            println!(
+                "[DRY-RUN] Condition met for task '{}', action would be executed.",
+                task.name
+            );
         } else {
-            strategy.action(args);
+            strategy.action();
         }
     } else {
         println!(
