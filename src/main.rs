@@ -3,17 +3,30 @@ use serde::Deserialize;
 use std::{fs, path::Path};
 
 #[derive(Deserialize)]
-struct Task {
-    name: String,
-    action: String,
-    args: TaskArgs,
+struct FileArgs {
+    path: String,
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "type")]
-enum TaskArgs {
-    File { path: String },
-    Copy { src: String, dest: String },
+struct CopyArgs {
+    src: String,
+    dest: String,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "lowercase")]
+enum Task {
+    File { name: String, args: FileArgs },
+    Copy { name: String, args: CopyArgs },
+}
+
+impl Task {
+    fn name(&self) -> &str {
+        match self {
+            Task::File { name, .. } => name,
+            Task::Copy { name, .. } => name,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -29,7 +42,7 @@ trait TaskStrategy {
             if dry_run_mode {
                 println!(
                     "[DRY-RUN] Condition met for task '{}', action would be executed.",
-                    task.name
+                    task.name()
                 );
             } else {
                 self.action();
@@ -37,7 +50,7 @@ trait TaskStrategy {
         } else {
             println!(
                 "Condition not met for task '{}', skipping action.",
-                task.name
+                task.name()
             );
         }
     }
@@ -132,12 +145,12 @@ fn main() {
 
     workflow.tasks.iter().for_each(|task| {
         if args.verbose {
-            println!("Executing task: {}", task.name);
+            println!("Executing task: {}", task.name());
         }
 
-        let strategy: Box<dyn TaskStrategy> = match &task.args {
-            TaskArgs::File { path } => Box::new(FileTask::new(path.clone())),
-            TaskArgs::Copy { src, dest } => Box::new(CopyTask::new(src.clone(), dest.clone())),
+        let strategy: Box<dyn TaskStrategy> = match task {
+            Task::File { args, .. } => Box::new(FileTask::new(args.path.clone())),
+            Task::Copy { args, .. } => Box::new(CopyTask::new(args.src.clone(), args.dest.clone())),
         };
 
         strategy.execute_task(args.dry_run, task);
