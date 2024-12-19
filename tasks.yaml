@@ -2,5 +2,9 @@ tasks:
   - name: Create a directory
     action: file
     args:
-      path: /tmp/example
-      state: directory
+      path: ./test
+  - name: Copy a file
+    action: copy
+    args:
+      src: ./test.txt
+      dest: ./test/test.txt

@@ -1,4 +1,4 @@
-use clap::{Arg, ArgAction, Command};
+use clap::Parser;
 use serde::Deserialize;
 use std::{fs, ops::Not, path::Path};
 
@@ -10,7 +10,7 @@ struct Task {
 }
 
 #[derive(Deserialize)]
-struct Playbook {
+struct Workflow {
     tasks: Vec<Task>,
 }
 
@@ -93,45 +93,30 @@ impl TaskStrategy for CopyTask {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    /// Path to the tasks file
+    #[arg(short, long)]
+    file: String,
+
+    /// Run in dry-run mode
+    #[arg(short, long, action = clap::ArgAction::SetTrue)]
+    dry_run: bool,
+
+    /// Show verbose output
+    #[arg(short, long, action = clap::ArgAction::SetTrue)]
+    verbose: bool,
+}
+
 fn main() {
-    let matches = Command::new("idempot-cli")
-        .version("1.0")
-        .about("A lightweight CLI for idempotent operations")
-        .arg(
-            Arg::new("file")
-                .short('f')
-                .long("file")
-                .value_name("FILE")
-                .help("Specifies the playbook file")
-                .required(true),
-        )
-        .arg(
-            Arg::new("dry-run")
-                .short('d')
-                .long("dry-run")
-                .help("Runs in dry-run mode without making changes")
-                .action(ArgAction::SetTrue),
-        )
-        .arg(
-            Arg::new("verbose")
-                .short('v')
-                .long("verbose")
-                .help("Enables verbose output")
-                .action(ArgAction::SetTrue),
-        )
-        .get_matches();
+    let args = Args::parse();
 
-    let file = matches
-        .get_one::<String>("file")
-        .expect("File argument is required");
-    let dry_run_mode = matches.get_flag("dry-run");
-    let verbose = matches.get_flag("verbose");
+    let file = fs::read_to_string(&args.file).expect("Unable to read the playbook file");
+    let workflow: Workflow = serde_yaml::from_str(&file).expect("Invalid YAML format");
 
-    let playbook_content = fs::read_to_string(file).expect("Unable to read the playbook file");
-    let playbook: Playbook = serde_yaml::from_str(&playbook_content).expect("Invalid YAML format");
-
-    playbook.tasks.iter().for_each(|task| {
-        if verbose {
+    workflow.tasks.iter().for_each(|task| {
+        if args.verbose {
             println!("Executing task: {}", task.name);
         }
 
@@ -144,6 +129,6 @@ fn main() {
             }
         };
 
-        strategy.execute_task(dry_run_mode, task);
+        strategy.execute_task(args.dry_run, task);
     });
 }
