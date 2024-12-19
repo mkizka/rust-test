@@ -1,7 +1,7 @@
 use clap::{Arg, ArgAction, Command};
 use serde::Deserialize;
-use std::fs;
-use std::process::Command as ProcessCommand;
+use std::any::Any;
+use std::{fs, path::Path};
 
 #[derive(Deserialize)]
 struct Task {
@@ -15,53 +15,96 @@ struct Playbook {
     tasks: Vec<Task>,
 }
 
-trait TaskStrategy {
-    fn condition(&self, args: &serde_yaml::Value) -> bool;
-    fn action(&self, args: &serde_yaml::Value);
+#[derive(Debug)]
+struct FileTaskContext {
+    path: String,
 }
+
+impl FileTaskContext {
+    fn from_yaml(value: &serde_yaml::Value) -> Result<Self, String> {
+        let path = value["path"]
+            .as_str()
+            .ok_or_else(|| "Missing or invalid 'path' argument".to_string())?
+            .to_string();
+        Ok(Self { path })
+    }
+}
+
+#[derive(Debug)]
+struct CopyTaskContext {
+    src: String,
+    dest: String,
+}
+
+impl CopyTaskContext {
+    fn from_yaml(value: &serde_yaml::Value) -> Result<Self, String> {
+        let src = value["src"]
+            .as_str()
+            .ok_or_else(|| "Missing or invalid 'src' argument".to_string())?
+            .to_string();
+        let dest = value["dest"]
+            .as_str()
+            .ok_or_else(|| "Missing or invalid 'dest' argument".to_string())?
+            .to_string();
+        Ok(Self { src, dest })
+    }
+}
+
+trait TaskStrategy {
+    fn validate_args(&self, args: &serde_yaml::Value) -> Result<(), String>;
+    fn condition(&self, context: &dyn TaskContext) -> bool;
+    fn action(&self, context: &dyn TaskContext);
+}
+
+trait TaskContext: Any + std::fmt::Debug {}
+
+impl TaskContext for FileTaskContext {}
+impl TaskContext for CopyTaskContext {}
 
 struct FileTask;
 impl TaskStrategy for FileTask {
-    fn condition(&self, args: &serde_yaml::Value) -> bool {
-        !std::path::Path::new(args["path"].as_str().expect("Missing 'path' argument")).exists()
+    fn validate_args(&self, args: &serde_yaml::Value) -> Result<(), String> {
+        FileTaskContext::from_yaml(args)?;
+        Ok(())
     }
 
-    fn action(&self, args: &serde_yaml::Value) {
-        let path = args["path"].as_str().unwrap();
-        fs::create_dir_all(path).expect("Failed to create directory");
-        println!("Created directory: {}", path);
+    fn condition(&self, context: &dyn TaskContext) -> bool {
+        // downcast_refを使って具体的な型にキャストする
+        let context = context
+            .downcast_ref::<FileTaskContext>()
+            .expect("Invalid context for FileTask");
+        !Path::new(&context.path).exists()
+    }
+
+    fn action(&self, context: &dyn TaskContext) {
+        let context = context
+            .downcast_ref::<FileTaskContext>()
+            .expect("Invalid context for FileTask");
+        fs::create_dir_all(&context.path).expect("Failed to create directory");
+        println!("Created directory: {}", context.path);
     }
 }
 
 struct CopyTask;
 impl TaskStrategy for CopyTask {
-    fn condition(&self, args: &serde_yaml::Value) -> bool {
-        let dest = args["dest"].as_str().expect("Missing 'dest' argument");
-        !std::path::Path::new(dest).exists()
+    fn validate_args(&self, args: &serde_yaml::Value) -> Result<(), String> {
+        CopyTaskContext::from_yaml(args)?;
+        Ok(())
     }
 
-    fn action(&self, args: &serde_yaml::Value) {
-        let src = args["src"].as_str().expect("Missing 'src' argument");
-        let dest = args["dest"].as_str().unwrap();
-        fs::copy(src, dest).expect("Failed to copy file");
-        println!("Copied file from {} to {}", src, dest);
-    }
-}
-
-struct PackageTask;
-impl TaskStrategy for PackageTask {
-    fn condition(&self, args: &serde_yaml::Value) -> bool {
-        let name = args["name"].as_str().expect("Missing 'name' argument");
-        !is_package_installed(name)
+    fn condition(&self, context: &dyn TaskContext) -> bool {
+        let context = context
+            .downcast_ref::<CopyTaskContext>()
+            .expect("Invalid context for CopyTask");
+        !Path::new(&context.dest).exists()
     }
 
-    fn action(&self, args: &serde_yaml::Value) {
-        let name = args["name"].as_str().unwrap();
-        ProcessCommand::new("apt-get")
-            .args(["install", "-y", name])
-            .status()
-            .expect("Failed to install package");
-        println!("Installed package: {}", name);
+    fn action(&self, context: &dyn TaskContext) {
+        let context = context
+            .downcast_ref::<CopyTaskContext>()
+            .expect("Invalid context for CopyTask");
+        fs::copy(&context.src, &context.dest).expect("Failed to copy file");
+        println!("Copied file from {} to {}", context.src, context.dest);
     }
 }
 
@@ -78,10 +121,10 @@ fn main() {
                 .required(true),
         )
         .arg(
-            Arg::new("check")
-                .short('c')
-                .long("check")
-                .help("Runs in check mode without making changes")
+            Arg::new("dry-run")
+                .short('d')
+                .long("dry-run")
+                .help("Runs in dry-run mode without making changes")
                 .action(ArgAction::SetTrue),
         )
         .arg(
@@ -93,14 +136,16 @@ fn main() {
         )
         .get_matches();
 
-    let file = matches.get_one::<String>("file").unwrap();
-    let check_mode = matches.get_flag("check");
+    let file = matches
+        .get_one::<String>("file")
+        .expect("File argument is required");
+    let dry_run_mode = matches.get_flag("dry-run");
     let verbose = matches.get_flag("verbose");
 
     let playbook_content = fs::read_to_string(file).expect("Unable to read the playbook file");
     let playbook: Playbook = serde_yaml::from_str(&playbook_content).expect("Invalid YAML format");
 
-    for task in playbook.tasks {
+    playbook.tasks.iter().for_each(|task| {
         if verbose {
             println!("Executing task: {}", task.name);
         }
@@ -108,34 +153,54 @@ fn main() {
         let strategy: Box<dyn TaskStrategy> = match task.action.as_str() {
             "file" => Box::new(FileTask),
             "copy" => Box::new(CopyTask),
-            "package" => Box::new(PackageTask),
             _ => {
                 println!("Unknown action: {}", task.action);
-                continue;
+                return;
             }
         };
 
-        execute_task(strategy.as_ref(), &task.args, check_mode);
-    }
+        // 引数の検証を行う
+        match strategy.validate_args(&task.args) {
+            Ok(_) => {
+                // Contextを作成
+                let context: Box<dyn TaskContext> = match task.action.as_str() {
+                    "file" => Box::new(
+                        FileTaskContext::from_yaml(&task.args)
+                            .expect("Invalid arguments for FileTask"),
+                    ),
+                    "copy" => Box::new(
+                        CopyTaskContext::from_yaml(&task.args)
+                            .expect("Invalid arguments for CopyTask"),
+                    ),
+                    _ => {
+                        println!("Unknown action: {}", task.action);
+                        return;
+                    }
+                };
+
+                execute_task(&*strategy, &*context, dry_run_mode, task);
+            }
+            Err(e) => println!("Task '{}' failed argument validation: {}", task.name, e),
+        }
+    });
 }
 
-fn execute_task(strategy: &dyn TaskStrategy, args: &serde_yaml::Value, check_mode: bool) {
-    if strategy.condition(args) {
-        if check_mode {
-            println!("[CHECK] Condition met, action would be executed.");
+fn execute_task(
+    strategy: &dyn TaskStrategy,
+    context: &dyn TaskContext,
+    dry_run_mode: bool,
+    task: &Task,
+) {
+    if strategy.condition(context) {
+        if dry_run_mode {
+            println!("[DRY-RUN] Condition met for task '{}', action would be executed with context: {:?}", task.name, context);
         } else {
-            strategy.action(args);
+            strategy.action(context);
         }
     } else {
-        println!("Condition not met, skipping action.");
+        println!(
+            "Condition not met for task '{}', skipping action.",
+            task.name
+        );
     }
-}
-
-fn is_package_installed(name: &str) -> bool {
-    let output = ProcessCommand::new("dpkg-query")
-        .args(["-W", "--showformat='${Status}'", name])
-        .output()
-        .expect("Failed to query package status");
-
-    String::from_utf8_lossy(&output.stdout).contains("install ok installed")
 }
