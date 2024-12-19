@@ -6,14 +6,7 @@ use std::{fs, ops::Not, path::Path};
 struct Task {
     name: String,
     action: String,
-    args: TaskArgs,
-}
-
-#[derive(Deserialize, Clone)] // Clone traitを追加
-struct TaskArgs {
-    path: Option<String>,
-    src: Option<String>,
-    dest: Option<String>,
+    args: serde_yaml::Value,
 }
 
 #[derive(Deserialize)]
@@ -31,9 +24,12 @@ struct FileTask {
 }
 
 impl FileTask {
-    fn from_yaml(args: TaskArgs) -> Self {
+    fn from_yaml(args: &serde_yaml::Value) -> Self {
         FileTask {
-            path: args.path.expect("Missing 'path' argument"),
+            path: args["path"]
+                .as_str()
+                .expect("Missing 'path' argument")
+                .to_string(),
         }
     }
 }
@@ -55,10 +51,16 @@ struct CopyTask {
 }
 
 impl CopyTask {
-    fn from_yaml(args: TaskArgs) -> Self {
+    fn from_yaml(args: &serde_yaml::Value) -> Self {
         CopyTask {
-            src: args.src.expect("Missing 'src' argument"),
-            dest: args.dest.expect("Missing 'dest' argument"),
+            src: args["src"]
+                .as_str()
+                .expect("Missing 'src' argument")
+                .to_string(),
+            dest: args["dest"]
+                .as_str()
+                .expect("Invalid 'dest' argument")
+                .to_string(),
         }
     }
 }
@@ -117,8 +119,8 @@ fn main() {
         }
 
         let strategy: Box<dyn TaskStrategy> = match task.action.as_str() {
-            "file" => Box::new(FileTask::from_yaml(task.args.clone())),
-            "copy" => Box::new(CopyTask::from_yaml(task.args.clone())),
+            "file" => Box::new(FileTask::from_yaml(&task.args)),
+            "copy" => Box::new(CopyTask::from_yaml(&task.args)),
             _ => {
                 println!("Unknown action: {}", task.action);
                 return;
