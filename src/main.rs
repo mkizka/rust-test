@@ -1,149 +1,21 @@
-use clap::Parser;
-use serde::Deserialize;
-use std::{fs, path::Path};
+mod arg;
+mod strategy;
+mod yaml;
 
-#[derive(Deserialize)]
-struct FileActionArgs {
-    path: String,
-}
-
-#[derive(Deserialize)]
-struct CopyActionArgs {
-    src: String,
-    dest: String,
-}
-
-#[derive(Deserialize)]
-struct Task {
-    name: String,
-    #[serde(flatten)]
-    action: Action,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "action", rename_all = "lowercase")]
-enum Action {
-    File { args: FileActionArgs },
-    Copy { args: CopyActionArgs },
-}
-
-#[derive(Deserialize)]
-struct Workflow {
-    tasks: Vec<Task>,
-}
-
-trait TaskStrategy {
-    fn condition(&self) -> bool;
-    fn action(&self);
-    fn run(&self, task: &Task, args: &Args) {
-        if self.condition() {
-            if args.dry_run {
-                println!(
-                    "[DRY-RUN] Condition met for task '{}', action would be executed.",
-                    task.name
-                );
-            } else {
-                self.action();
-            }
-        } else {
-            println!(
-                "Condition not met for task '{}', skipping action.",
-                task.name
-            );
-        }
-    }
-}
-
-struct FileTask {
-    path: String,
-}
-
-impl TaskStrategy for FileTask {
-    fn condition(&self) -> bool {
-        !Path::new(&self.path).exists()
-    }
-
-    fn action(&self) {
-        if let Err(e) = fs::create_dir_all(&self.path) {
-            eprintln!("Failed to create directory '{}': {}", self.path, e);
-        } else {
-            println!("Created directory: {}", self.path);
-        }
-    }
-}
-
-struct CopyTask {
-    src: String,
-    dest: String,
-}
-
-impl TaskStrategy for CopyTask {
-    fn condition(&self) -> bool {
-        !Path::new(&self.dest).exists()
-    }
-
-    fn action(&self) {
-        if let Err(e) = fs::copy(&self.src, &self.dest) {
-            eprintln!(
-                "Failed to copy file from '{}' to '{}': {}",
-                self.src, self.dest, e
-            );
-        } else {
-            println!("Copied file from {} to {}", self.src, self.dest);
-        }
-    }
-}
-
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    /// Path to the tasks file
-    #[arg(short, long)]
-    file: String,
-
-    /// Run in dry-run mode
-    #[arg(short, long, action = clap::ArgAction::SetTrue)]
-    dry_run: bool,
-
-    /// Show verbose output
-    #[arg(short, long, action = clap::ArgAction::SetTrue)]
-    verbose: bool,
-}
+use arg::read_args;
+use std::process;
+use strategy::create_strategy;
+use yaml::read_yaml;
 
 fn main() {
-    let args = Args::parse();
+    let args = read_args();
 
-    let file = match fs::read_to_string(&args.file) {
-        Ok(content) => content,
-        Err(e) => {
-            eprintln!("Unable to read the playbook file '{}': {}", args.file, e);
-            return;
-        }
-    };
+    let yaml = read_yaml(&args.file).unwrap_or_else(|e| {
+        eprintln!("Failed to read workflow file: {}", e);
+        process::exit(1);
+    });
 
-    let workflow: Workflow = match serde_yaml::from_str(&file) {
-        Ok(parsed) => parsed,
-        Err(e) => {
-            eprintln!("Invalid YAML format in file '{}': {}", args.file, e);
-            return;
-        }
-    };
-
-    workflow.tasks.iter().for_each(|task| {
-        if args.verbose {
-            println!("Executing task: {}", task.name);
-        }
-
-        let strategy: Box<dyn TaskStrategy> = match &task.action {
-            Action::File { args, .. } => Box::new(FileTask {
-                path: args.path.clone(),
-            }),
-            Action::Copy { args, .. } => Box::new(CopyTask {
-                src: args.src.clone(),
-                dest: args.dest.clone(),
-            }),
-        };
-
-        strategy.run(task, &args);
+    yaml.tasks.iter().for_each(|task| {
+        create_strategy(task).run(task, &args);
     });
 }
