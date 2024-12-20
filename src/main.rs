@@ -3,30 +3,28 @@ use serde::Deserialize;
 use std::{fs, path::Path};
 
 #[derive(Deserialize)]
-struct FileArgs {
+struct FileActionArgs {
     path: String,
 }
 
 #[derive(Deserialize)]
-struct CopyArgs {
+struct CopyActionArgs {
     src: String,
     dest: String,
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "action", rename_all = "lowercase")]
-enum Task {
-    File { name: String, args: FileArgs },
-    Copy { name: String, args: CopyArgs },
+struct Task {
+    name: String,
+    #[serde(flatten)]
+    action: Action,
 }
 
-impl Task {
-    fn name(&self) -> &str {
-        match self {
-            Task::File { name, .. } => name,
-            Task::Copy { name, .. } => name,
-        }
-    }
+#[derive(Deserialize)]
+#[serde(tag = "action", rename_all = "lowercase")]
+enum Action {
+    File { args: FileActionArgs },
+    Copy { args: CopyActionArgs },
 }
 
 #[derive(Deserialize)]
@@ -37,12 +35,12 @@ struct Workflow {
 trait TaskStrategy {
     fn condition(&self) -> bool;
     fn action(&self);
-    fn execute_task(&self, dry_run_mode: bool, task: &Task) {
+    fn run(&self, task: &Task, args: &Args) {
         if self.condition() {
-            if dry_run_mode {
+            if args.dry_run {
                 println!(
                     "[DRY-RUN] Condition met for task '{}', action would be executed.",
-                    task.name()
+                    task.name
                 );
             } else {
                 self.action();
@@ -50,7 +48,7 @@ trait TaskStrategy {
         } else {
             println!(
                 "Condition not met for task '{}', skipping action.",
-                task.name()
+                task.name
             );
         }
     }
@@ -58,12 +56,6 @@ trait TaskStrategy {
 
 struct FileTask {
     path: String,
-}
-
-impl FileTask {
-    fn new(path: String) -> Self {
-        FileTask { path }
-    }
 }
 
 impl TaskStrategy for FileTask {
@@ -83,12 +75,6 @@ impl TaskStrategy for FileTask {
 struct CopyTask {
     src: String,
     dest: String,
-}
-
-impl CopyTask {
-    fn new(src: String, dest: String) -> Self {
-        CopyTask { src, dest }
-    }
 }
 
 impl TaskStrategy for CopyTask {
@@ -145,14 +131,19 @@ fn main() {
 
     workflow.tasks.iter().for_each(|task| {
         if args.verbose {
-            println!("Executing task: {}", task.name());
+            println!("Executing task: {}", task.name);
         }
 
-        let strategy: Box<dyn TaskStrategy> = match task {
-            Task::File { args, .. } => Box::new(FileTask::new(args.path.clone())),
-            Task::Copy { args, .. } => Box::new(CopyTask::new(args.src.clone(), args.dest.clone())),
+        let strategy: Box<dyn TaskStrategy> = match &task.action {
+            Action::File { args, .. } => Box::new(FileTask {
+                path: args.path.clone(),
+            }),
+            Action::Copy { args, .. } => Box::new(CopyTask {
+                src: args.src.clone(),
+                dest: args.dest.clone(),
+            }),
         };
 
-        strategy.execute_task(args.dry_run, task);
+        strategy.run(task, &args);
     });
 }
