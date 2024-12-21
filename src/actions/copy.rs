@@ -1,9 +1,15 @@
 use anyhow::Result;
 use log::info;
-use std::fs;
+use serde::Deserialize;
+use std::{fs, path::PathBuf};
 
 use super::traits::Action;
-use crate::yaml::CopyActionArgs;
+
+#[derive(Deserialize, Clone)]
+pub struct CopyActionArgs {
+    pub src: PathBuf,
+    pub dest: PathBuf,
+}
 
 pub struct CopyAction {
     args: CopyActionArgs,

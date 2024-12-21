@@ -1,17 +1,8 @@
 use anyhow::Result;
 use serde::Deserialize;
-use std::{fs, path::PathBuf};
+use std::fs;
 
-#[derive(Deserialize, Clone)]
-pub struct FileActionArgs {
-    pub path: PathBuf,
-}
-
-#[derive(Deserialize, Clone)]
-pub struct CopyActionArgs {
-    pub src: PathBuf,
-    pub dest: PathBuf,
-}
+use crate::actions::{copy::CopyActionArgs, file::FileActionArgs};
 
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "lowercase")]

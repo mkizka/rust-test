@@ -1,5 +1,5 @@
-mod copy;
-mod file;
+pub mod copy;
+pub mod file;
 mod traits;
 
 pub use copy::CopyAction;
