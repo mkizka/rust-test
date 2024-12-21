@@ -1,21 +1,23 @@
+mod actions;
 mod arg;
-mod strategy;
 mod yaml;
 
+use actions::create_action;
+use anyhow::Result;
 use arg::read_args;
-use std::process;
-use strategy::create_strategy;
+use log::info;
 use yaml::read_yaml;
 
-fn main() {
+fn main() -> Result<()> {
+    env_logger::init();
+
     let args = read_args();
+    let yaml = read_yaml(&args.file)?;
 
-    let yaml = read_yaml(&args.file).unwrap_or_else(|e| {
-        eprintln!("Failed to read workflow file: {}", e);
-        process::exit(1);
-    });
+    info!("Starting task execution");
+    for task in &yaml.tasks {
+        create_action(&task.action).run(task, &args);
+    }
 
-    yaml.tasks.iter().for_each(|task| {
-        create_strategy(task).run(task, &args);
-    });
+    Ok(())
 }
