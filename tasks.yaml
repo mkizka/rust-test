@@ -1,10 +1,23 @@
 tasks:
-  - name: Create a directory
-    action: file
+  - name: Run shell command
+    action: shell
+    args:
+      command: touch test.txt
+  - name: Create directory
+    action: mkdir
     args:
       path: ./test
-  - name: Copy a file
+  - name: Move file
+    action: move
+    args:
+      src: test.txt
+      dest: ./test/test.txt
+  - name: Copy file
     action: copy
     args:
-      src: ./test.txt
-      dest: ./test/test.txt
+      src: ./test/test.txt
+      dest: ./test/test_copy.txt
+  - name: Remove file
+    action: remove
+    args:
+      path: ./test/test.txt

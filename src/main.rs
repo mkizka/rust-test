@@ -6,9 +6,11 @@ use actions::create_action;
 use anyhow::Result;
 use arg::read_args;
 use log::info;
+use std::env;
 use yaml::read_yaml;
 
 fn main() -> Result<()> {
+    env::set_var("RUST_LOG", "info");
     env_logger::init();
 
     let args = read_args();

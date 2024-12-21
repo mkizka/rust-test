@@ -6,21 +6,21 @@ use std::{fs, path::PathBuf};
 use super::traits::Action;
 
 #[derive(Deserialize, Clone)]
-pub struct FileActionArgs {
+pub struct MkdirActionArgs {
     pub path: PathBuf,
 }
 
-pub struct FileAction {
-    args: FileActionArgs,
+pub struct MkdirAction {
+    args: MkdirActionArgs,
 }
 
-impl FileAction {
-    pub fn new(args: FileActionArgs) -> Self {
+impl MkdirAction {
+    pub fn new(args: MkdirActionArgs) -> Self {
         Self { args }
     }
 }
 
-impl Action for FileAction {
+impl Action for MkdirAction {
     fn condition(&self) -> bool {
         !self.args.path.exists()
     }

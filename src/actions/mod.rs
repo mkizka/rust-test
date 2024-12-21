@@ -1,16 +1,25 @@
 pub mod copy;
-pub mod file;
+pub mod mkdir;
+pub mod mv;
+pub mod remove;
+pub mod shell;
 mod traits;
 
 pub use copy::CopyAction;
-pub use file::FileAction;
+pub use mkdir::MkdirAction;
+pub use mv::MoveAction;
+pub use remove::RemoveAction;
+pub use shell::ShellAction;
 pub use traits::Action;
 
 use crate::yaml::ActionDefinition;
 
 pub fn create_action(action: &ActionDefinition) -> Box<dyn Action> {
     match &action {
-        ActionDefinition::File { args } => Box::new(FileAction::new(args.clone())),
         ActionDefinition::Copy { args } => Box::new(CopyAction::new(args.clone())),
+        ActionDefinition::Remove { args } => Box::new(RemoveAction::new(args.clone())),
+        ActionDefinition::Mkdir { args } => Box::new(MkdirAction::new(args.clone())),
+        ActionDefinition::Move { args } => Box::new(MoveAction::new(args.clone())),
+        ActionDefinition::Shell { args } => Box::new(ShellAction::new(args.clone())),
     }
 }

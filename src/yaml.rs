@@ -2,13 +2,20 @@ use anyhow::Result;
 use serde::Deserialize;
 use std::fs;
 
-use crate::actions::{copy::CopyActionArgs, file::FileActionArgs};
+use crate::actions::copy::CopyActionArgs;
+use crate::actions::mkdir::MkdirActionArgs;
+use crate::actions::mv::MoveActionArgs;
+use crate::actions::remove::RemoveActionArgs;
+use crate::actions::shell::ShellActionArgs;
 
 #[derive(Deserialize)]
 #[serde(tag = "action", rename_all = "lowercase")]
 pub enum ActionDefinition {
-    File { args: FileActionArgs },
     Copy { args: CopyActionArgs },
+    Remove { args: RemoveActionArgs },
+    Mkdir { args: MkdirActionArgs },
+    Move { args: MoveActionArgs },
+    Shell { args: ShellActionArgs },
 }
 
 #[derive(Deserialize)]
